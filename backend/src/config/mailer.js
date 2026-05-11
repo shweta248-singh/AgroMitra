@@ -22,23 +22,22 @@ const smtpPort = Number(process.env.SMTP_PORT || 465);
 
 export const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",
-
   port: smtpPort,
-
   secure: smtpPort === 465,
-
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-
   family: 4,
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
 });
 
 transporter.verify((error) => {
   if (error) {
-    console.error("SMTP ERROR:", error);
+    console.error("SMTP ERROR:", error.message);
   } else {
-    console.log("SMTP SERVER IS READY");
+    console.log("SMTP SERVER IS READY ✅");
   }
 });
