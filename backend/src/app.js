@@ -14,10 +14,14 @@ import orderRoutes from "./routes/orderRoutes.js";
 import { errorHandler } from "./middleware/errorMiddleware.js";
 
 const app = express();
+
 app.set("trust proxy", 1);
 
-// ✅ Security middlewares
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+  })
+);
 
 const allowedOrigins = [
   "http://localhost:5173",
@@ -25,27 +29,31 @@ const allowedOrigins = [
   "http://localhost:5175",
   "http://localhost:5176",
   process.env.FRONTEND_URL,
+  process.env.CLIENT_URL,
+  process.env.CORS_ORIGIN,
 ].filter(Boolean);
 
 app.use(
   cors({
-    origin: function (origin, callback) {
+    origin(origin, callback) {
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
 
-      return callback(new Error("Not allowed by CORS"));
+      console.error("❌ CORS blocked origin:", origin);
+      return callback(new Error(`Not allowed by CORS: ${origin}`));
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
 app.use(express.json({ limit: "10mb" }));
 app.use(morgan("dev"));
 
-// ✅ Health route
 app.get("/", (req, res) => {
   res.status(200).send("🚀 AgroMitra Backend Running");
 });
@@ -59,45 +67,53 @@ app.get("/health", (req, res) => {
   });
 });
 
-// ✅ Rate limiters
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 150,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: { message: "Too many requests. Please try again later." },
 });
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: {
-    message: "Too many authentication attempts. Please try again after 15 minutes.",
+    message:
+      "Too many authentication attempts. Please try again after 15 minutes.",
   },
 });
 
 app.use(globalLimiter);
 app.use("/api/auth", authLimiter);
 
-// ✅ Static uploads
 app.use("/uploads", express.static("uploads"));
 
-// ✅ Routes
 app.use("/api/chat", chatRoutes);
-app.use("/api/auth", authOtpRoutes);
+
+// ✅ Main auth routes: /api/auth/register, /api/auth/login
+app.use("/api/auth", authRoutes);
+
+// ✅ OTP routes: /api/auth/otp/register/send-otp
+app.use("/api/auth/otp", authOtpRoutes);
+
+// ✅ GST routes: /api/auth/seller/verify-gst
 app.use("/api/auth/seller", authGstRoutes);
-app.use("/api/auth/legacy", authRoutes);
+
 app.use("/api/products", productRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
 
-// ✅ 404 route
 app.use((req, res) => {
   res.status(404).json({
     success: false,
     message: "Route not found",
+    path: req.originalUrl,
   });
 });
 
-// ✅ Error handler last
 app.use(errorHandler);
 
 export default app;
