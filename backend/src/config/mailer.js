@@ -57,45 +57,29 @@
 
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
-import dns from "node:dns";
 
 dotenv.config();
 
-dns.setDefaultResultOrder("ipv4first");
-
 export const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
+  host: process.env.SMTP_HOST,
 
-  port: 465,
+  port: Number(process.env.SMTP_PORT || 587),
 
-  secure: true,
+  secure: false,
 
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
 
-  family: 4,
+  requireTLS: true,
 
-  tls: {
-    servername: "smtp.gmail.com",
-  },
-
-  connectionTimeout: 90000,
-  greetingTimeout: 90000,
-  socketTimeout: 90000,
+  connectionTimeout: 60000,
+  greetingTimeout: 60000,
+  socketTimeout: 60000,
 });
 
-export const sendMail = async ({ to, subject, html, text }) => {
-  return transporter.sendMail({
-    from: `"AgroMitra" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
-    to,
-    subject,
-    html,
-    text,
-  });
-};
-
+// Verify SMTP connection
 transporter.verify((error) => {
   if (error) {
     console.error("SMTP ERROR:", error.message);
@@ -103,3 +87,28 @@ transporter.verify((error) => {
     console.log("SMTP SERVER IS READY ✅");
   }
 });
+
+// Reusable sendMail function
+export const sendMail = async ({
+  to,
+  subject,
+  html,
+  text,
+}) => {
+  try {
+    const info = await transporter.sendMail({
+      from: `"AgroMitra" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+      to,
+      subject,
+      html,
+      text,
+    });
+
+    console.log("Email sent:", info.messageId);
+
+    return info;
+  } catch (error) {
+    console.error("Send mail error:", error.message);
+    throw error;
+  }
+};
