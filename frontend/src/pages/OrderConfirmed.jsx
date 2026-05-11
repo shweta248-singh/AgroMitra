@@ -3,6 +3,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import confetti from 'canvas-confetti'
 import axios from 'axios'
 import '../components/landing.css'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL 
 
 export default function OrderConfirmed() {
   const { state } = useLocation()
@@ -50,7 +51,7 @@ export default function OrderConfirmed() {
       if (!token) return
 
       const res = await axios.get(
-        `http://localhost:5000/api/orders/track/${oid}`,
+        `${API_BASE_URL}/orders/track/${oid}`,
       )
 
       console.log("ORDER CONFIRMED - API response:", res.data)

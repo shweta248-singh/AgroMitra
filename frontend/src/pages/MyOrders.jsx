@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import axios from 'axios'
 import { useLanguage } from '../context/LanguageContext'
 import '../components/landing.css'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
 
 const STATUS_LABELS = {
   placed:     { label: 'Placed',      cls: 'status--placed' },
@@ -81,7 +82,7 @@ export default function MyOrders() {
     const token = localStorage.getItem('token')
 
     try {
-      const res = await axios.get('http://localhost:5000/api/orders', {
+      const res = await axios.get(`${API_BASE_URL}/orders`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       const fetchedOrders = res.data?.orders || res.data || []

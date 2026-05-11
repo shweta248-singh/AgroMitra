@@ -4,6 +4,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import axios from 'axios'
 import { useLanguage } from '../context/LanguageContext'
 import '../components/landing.css'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
 
 // Merchant Configuration
 const MERCHANT_UPI  = import.meta.env.VITE_MERCHANT_UPI_ID || 'abhaypandey092004-2@oksbi'
@@ -78,7 +79,7 @@ export default function PaymentSuccess() {
     setProcessing(true)
     try {
       const response = await axios.patch(
-        `http://localhost:5000/api/orders/${orderId}/payment-status`,
+        `${API_BASE_URL}/orders/${orderId}/payment-status`,
         {
           transaction_id: transactionId,
           payment_method: "UPI",

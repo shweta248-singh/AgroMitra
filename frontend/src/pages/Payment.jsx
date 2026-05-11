@@ -13,6 +13,7 @@ import { supabase } from '../lib/supabase'
 import axios from 'axios'
 import { useLanguage } from '../context/LanguageContext'
 import '../components/landing.css'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
 
 // Fixed merchant UPI ID — stored in env for easy config
 const MERCHANT_UPI  = import.meta.env.VITE_MERCHANT_UPI_ID || 'abhaypandey092004-2@oksbi'
@@ -130,7 +131,7 @@ export default function Payment() {
         ? 'pending' 
         : paymentStatus.toLowerCase();
 
-      const response = await axios.post("http://localhost:5000/api/orders", {
+      const response = await axios.post(`${API_BASE_URL}/orders`, {
         address_id:     orderData.addressId,
         total_amount:   orderData.grandTotal,
         payment_method: paymentMethod.toLowerCase(),
