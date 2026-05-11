@@ -65,16 +65,22 @@ dns.setDefaultResultOrder("ipv4first");
 
 export const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  requireTLS: true,
+
+  port: 465,
+
+  secure: true,
+
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+
+  family: 4,
+
   tls: {
     servername: "smtp.gmail.com",
   },
+
   connectionTimeout: 90000,
   greetingTimeout: 90000,
   socketTimeout: 90000,
