@@ -728,15 +728,10 @@
 
 import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
+import { supabase } from "../lib/supabase";
 import { validateEmail, normalizeEmail } from "../utils/authUtils";
 import { useLanguage } from "../context/LanguageContext";
 import "../components/landing.css";
-
-const API_URL = (
-  import.meta.env.VITE_API_URL ||
-  import.meta.env.VITE_API_BASE_URL ||
-  ""
-).replace(/\/$/, "");
 
 const GST_REGEX =
   /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
@@ -744,6 +739,9 @@ const GST_REGEX =
 export default function Register() {
   const navigate = useNavigate();
   const { t } = useLanguage();
+
+  const [step, setStep] = useState("register");
+  const [otp, setOtp] = useState("");
 
   const [formData, setFormData] = useState({
     full_name: "",
@@ -772,34 +770,44 @@ export default function Register() {
     }));
   }
 
-  async function parseResponse(res) {
-    const text = await res.text();
-    let data = {};
+  async function saveUserToBackend() {
+    const apiUrl = (
+      import.meta.env.VITE_API_URL ||
+      import.meta.env.VITE_API_BASE_URL ||
+      ""
+    ).replace(/\/$/, "");
+
+    if (!apiUrl) return;
+
+    const dbRole = formData.role === "seller" ? "farmer" : "buyer";
 
     try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { message: text };
+      await fetch(`${apiUrl}/auth/register/profile`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          full_name: formData.full_name.trim(),
+          name: formData.full_name.trim(),
+          email: normalizeEmail(formData.email),
+          phone: formData.phone.trim(),
+          role: dbRole,
+          gst_number:
+            formData.role === "seller"
+              ? formData.gst_number.trim().toUpperCase()
+              : null,
+        }),
+      });
+    } catch (err) {
+      console.warn("Profile sync skipped:", err.message);
     }
-
-    if (!res.ok) {
-      throw new Error(data?.message || "Registration failed");
-    }
-
-    return data;
   }
 
-  async function handleInitialSubmit(e) {
+  async function handleRegisterSubmit(e) {
     e.preventDefault();
 
     if (loading) return;
-
-    if (!API_URL) {
-      setError(
-        "API URL missing. Please set VITE_API_URL in frontend environment variables."
-      );
-      return;
-    }
 
     const normalizedEmail = normalizeEmail(formData.email);
 
@@ -830,46 +838,144 @@ export default function Register() {
     try {
       const dbRole = formData.role === "seller" ? "farmer" : "buyer";
 
-      const res = await fetch(`${API_URL}/auth/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password: formData.password,
+        options: {
+          data: {
+            full_name: formData.full_name.trim(),
+            name: formData.full_name.trim(),
+            phone: formData.phone.trim(),
+            role: dbRole,
+            gst_number:
+              formData.role === "seller"
+                ? formData.gst_number.trim().toUpperCase()
+                : null,
+          },
         },
-        body: JSON.stringify({
-          full_name: formData.full_name.trim(),
-          name: formData.full_name.trim(),
-          email: normalizedEmail,
-          password: formData.password,
-          phone: formData.phone.trim(),
-          role: dbRole,
-          gst_number:
-            formData.role === "seller"
-              ? formData.gst_number.trim().toUpperCase()
-              : null,
-        }),
       });
 
-      await parseResponse(res);
-
-      setSuccess(
-        "Registration successful. Please check your email and confirm your account before login."
-      );
-
-      setTimeout(() => {
-        navigate(formData.role === "seller" ? "/seller-login" : "/buyer-login");
-      }, 2500);
-    } catch (err) {
-      if (err.message?.toLowerCase().includes("failed to fetch")) {
-        setError(
-          "Backend connection failed. Please check VITE_API_URL and backend CORS settings."
-        );
-      } else {
-        setError(err.message || "Registration failed");
+      if (signUpError) {
+        throw signUpError;
       }
+
+      setSuccess("OTP sent to your email. Please enter OTP to verify account.");
+      setStep("otp");
+    } catch (err) {
+      setError(err.message || "Registration failed");
     } finally {
       setLoading(false);
     }
   }
+
+  async function handleVerifyOtp(e) {
+    e.preventDefault();
+
+    if (loading) return;
+
+    const normalizedEmail = normalizeEmail(formData.email);
+
+    if (!otp || otp.length < 6) {
+      setError("Please enter valid OTP");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email: normalizedEmail,
+        token: otp,
+        type: "signup",
+      });
+
+      if (verifyError) {
+        throw verifyError;
+      }
+
+      await saveUserToBackend();
+
+      setSuccess("Email verified successfully. Redirecting to login...");
+
+      setTimeout(() => {
+        navigate(formData.role === "seller" ? "/seller-login" : "/buyer-login");
+      }, 1500);
+    } catch (err) {
+      setError(err.message || "OTP verification failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResendOtp() {
+    if (loading) return;
+
+    const normalizedEmail = normalizeEmail(formData.email);
+
+    if (!validateEmail(normalizedEmail)) {
+      setError("Invalid email address");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        type: "signup",
+        email: normalizedEmail,
+      });
+
+      if (resendError) {
+        throw resendError;
+      }
+
+      setSuccess("New OTP sent to your email.");
+    } catch (err) {
+      setError(err.message || "Failed to resend OTP");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveUserToBackend() {
+  const apiUrl = (
+    import.meta.env.VITE_API_URL ||
+    import.meta.env.VITE_API_BASE_URL ||
+    ""
+  ).replace(/\/$/, "");
+
+  if (!apiUrl) return;
+
+  const newRole = formData.role === "seller" ? "farmer" : "buyer";
+  const email = normalizeEmail(formData.email);
+
+  try {
+    await fetch(`${apiUrl}/auth/register/profile`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        full_name: formData.full_name.trim(),
+        name: formData.full_name.trim(),
+        email,
+        phone: formData.phone.trim(),
+        role: newRole,
+        allow_same_email_multi_role: true,
+        gst_number:
+          formData.role === "seller"
+            ? formData.gst_number.trim().toUpperCase()
+            : null,
+      }),
+    });
+  } catch (err) {
+    console.warn("Profile sync skipped:", err.message);
+  }
+}
 
   return (
     <section className="register-page">
@@ -927,16 +1033,24 @@ export default function Register() {
               <div className="register-icon">✨</div>
 
               <span className="register-small-badge">
-                {safeText("auth.createAccount", "Create Account")}
+                {step === "register"
+                  ? safeText("auth.createAccount", "Create Account")
+                  : "Verify OTP"}
               </span>
 
-              <h2>{safeText("auth.register", "Register")}</h2>
+              <h2>
+                {step === "register"
+                  ? safeText("auth.register", "Register")
+                  : "Email Verification"}
+              </h2>
 
               <p>
-                {safeText(
-                  "auth.registerSubtitle",
-                  "Create your AgroMitra account and continue your journey."
-                )}
+                {step === "register"
+                  ? safeText(
+                      "auth.registerSubtitle",
+                      "Create your AgroMitra account and continue your journey."
+                    )
+                  : `Enter OTP sent to ${formData.email}`}
               </p>
             </div>
 
@@ -944,132 +1058,206 @@ export default function Register() {
 
             {success ? <div className="register-success">{success}</div> : null}
 
-            <form onSubmit={handleInitialSubmit} className="register-form">
-              <div className="register-form-group">
-                <label>{safeText("auth.fullName", "Full Name")}</label>
-                <input
-                  type="text"
-                  name="full_name"
-                  placeholder={safeText("auth.fullName", "Full Name")}
-                  value={formData.full_name}
-                  onChange={handleChange}
-                  required
-                />
-              </div>
-
-              <div className="register-grid-two">
+            {step === "register" ? (
+              <form onSubmit={handleRegisterSubmit} className="register-form">
                 <div className="register-form-group">
-                  <label>{safeText("auth.email", "Email Address")}</label>
-                  <input
-                    type="email"
-                    name="email"
-                    placeholder="you@example.com"
-                    value={formData.email}
-                    onChange={handleChange}
-                    required
-                  />
-                </div>
-
-                <div className="register-form-group">
-                  <label>{safeText("auth.phone", "Phone Number")}</label>
+                  <label>{safeText("auth.fullName", "Full Name")}</label>
                   <input
                     type="text"
-                    name="phone"
-                    placeholder={safeText("auth.phone", "Phone Number")}
-                    value={formData.phone}
+                    name="full_name"
+                    placeholder={safeText("auth.fullName", "Full Name")}
+                    value={formData.full_name}
                     onChange={handleChange}
                     required
                   />
                 </div>
-              </div>
 
-              <div className="register-grid-two">
-                <div className="register-form-group">
-                  <label>{safeText("auth.password", "Password")}</label>
-
-                  <div className="register-password-field">
+                <div className="register-grid-two">
+                  <div className="register-form-group">
+                    <label>{safeText("auth.email", "Email Address")}</label>
                     <input
-                      type={showPassword ? "text" : "password"}
-                      name="password"
-                      placeholder={safeText("auth.password", "Password")}
-                      value={formData.password}
+                      type="email"
+                      name="email"
+                      placeholder="you@example.com"
+                      value={formData.email}
                       onChange={handleChange}
                       required
                     />
+                  </div>
 
-                    <button
-                      type="button"
-                      className="register-password-toggle"
-                      onClick={() => setShowPassword((prev) => !prev)}
-                    >
-                      {showPassword
-                        ? safeText("auth.hide", "Hide")
-                        : safeText("auth.show", "Show")}
-                    </button>
+                  <div className="register-form-group">
+                    <label>{safeText("auth.phone", "Phone Number")}</label>
+                    <input
+                      type="text"
+                      name="phone"
+                      placeholder={safeText("auth.phone", "Phone Number")}
+                      value={formData.phone}
+                      onChange={handleChange}
+                      required
+                    />
                   </div>
                 </div>
 
-                <div className="register-form-group">
-                  <label>{safeText("auth.role", "Register As")}</label>
+                <div className="register-grid-two">
+                  <div className="register-form-group">
+                    <label>{safeText("auth.password", "Password")}</label>
 
-                  <select
-                    name="role"
-                    value={formData.role}
-                    onChange={handleChange}
-                    required
-                  >
-                    <option value="buyer">
-                      {safeText("auth.buyerLogin", "Buyer")}
-                    </option>
-                    <option value="seller">
-                      {safeText("auth.sellerLogin", "Seller")}
-                    </option>
-                  </select>
+                    <div className="register-password-field">
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        name="password"
+                        placeholder={safeText("auth.password", "Password")}
+                        value={formData.password}
+                        onChange={handleChange}
+                        required
+                      />
+
+                      <button
+                        type="button"
+                        className="register-password-toggle"
+                        onClick={() => setShowPassword((prev) => !prev)}
+                      >
+                        {showPassword
+                          ? safeText("auth.hide", "Hide")
+                          : safeText("auth.show", "Show")}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="register-form-group">
+                    <label>{safeText("auth.role", "Register As")}</label>
+
+                    <select
+                      name="role"
+                      value={formData.role}
+                      onChange={handleChange}
+                      required
+                    >
+                      <option value="buyer">
+                        {safeText("auth.buyerLogin", "Buyer")}
+                      </option>
+                      <option value="seller">
+                        {safeText("auth.sellerLogin", "Seller")}
+                      </option>
+                    </select>
+                  </div>
                 </div>
-              </div>
 
-              {formData.role === "seller" && (
+                {formData.role === "seller" && (
+                  <div className="register-form-group">
+                    <label>{safeText("auth.gst", "GST Number")}</label>
+
+                    <input
+                      type="text"
+                      name="gst_number"
+                      placeholder="e.g. 22AAAAA0000A1Z5"
+                      value={formData.gst_number}
+                      maxLength="15"
+                      onChange={(e) => {
+                        const val = e.target.value
+                          .toUpperCase()
+                          .replace(/[^0-9A-Z]/g, "");
+
+                        handleChange({
+                          target: {
+                            name: "gst_number",
+                            value: val,
+                          },
+                        });
+                      }}
+                      required
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="register-btn-main"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <div className="btn-loader-wrapper">
+                      <div className="spinner mini"></div>
+                      <span>
+                        {safeText("auth.registering", "Registering...")}
+                      </span>
+                    </div>
+                  ) : (
+                    safeText("auth.createAccount", "Create Account")
+                  )}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleVerifyOtp} className="register-form">
                 <div className="register-form-group">
-                  <label>{safeText("auth.gst", "GST Number")}</label>
-
+                  <label>Enter OTP</label>
                   <input
                     type="text"
-                    name="gst_number"
-                    placeholder="e.g. 22AAAAA0000A1Z5"
-                    value={formData.gst_number}
-                    maxLength="15"
-                    onChange={(e) => {
-                      const val = e.target.value
-                        .toUpperCase()
-                        .replace(/[^0-9A-Z]/g, "");
-
-                      handleChange({
-                        target: {
-                          name: "gst_number",
-                          value: val,
-                        },
-                      });
-                    }}
+                    placeholder="Enter OTP from email"
+                    value={otp}
+                    onChange={(e) =>
+                      setOtp(e.target.value.replace(/\D/g, "").slice(0, 8))
+                    }
                     required
                   />
+                  <small
+                    style={{
+                      color: "#64748b",
+                      marginTop: "8px",
+                      display: "block",
+                    }}
+                  >
+                    OTP sent to {formData.email}
+                  </small>
                 </div>
-              )}
 
-              <button
-                type="submit"
-                className="register-btn-main"
-                disabled={loading}
-              >
-                {loading ? (
-                  <div className="btn-loader-wrapper">
-                    <div className="spinner mini"></div>
-                    <span>{safeText("auth.registering", "Registering...")}</span>
-                  </div>
-                ) : (
-                  safeText("auth.createAccount", "Create Account")
-                )}
-              </button>
-            </form>
+                <button
+                  type="submit"
+                  className="register-btn-main"
+                  disabled={loading}
+                >
+                  {loading ? "Verifying..." : "Verify OTP"}
+                </button>
+
+                <button
+                  type="button"
+                  className="resend-otp-btn"
+                  onClick={handleResendOtp}
+                  disabled={loading}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#10b981",
+                    cursor: "pointer",
+                    marginTop: "15px",
+                    fontSize: "14px",
+                    fontWeight: "500",
+                  }}
+                >
+                  Resend OTP
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep("register");
+                    setOtp("");
+                    setError("");
+                    setSuccess("");
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#64748b",
+                    cursor: "pointer",
+                    marginTop: "10px",
+                    fontSize: "14px",
+                  }}
+                >
+                  Change email
+                </button>
+              </form>
+            )}
 
             <div className="register-bottom">
               <p>

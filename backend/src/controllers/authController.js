@@ -583,3 +583,93 @@ export const googleLogin = async (req, res) => {
     });
   }
 };
+
+export const registerProfile = async (req, res) => {
+  try {
+    const { name, full_name, email, phone, role, gst_number } = req.body;
+
+    const normalizedEmail = email?.trim().toLowerCase();
+    const userName = name || full_name;
+    const newRole = role === "seller" || role === "farmer" ? "farmer" : "buyer";
+
+    if (!normalizedEmail || !userName || !newRole) {
+      return res.status(400).json({
+        message: "Name, email and role are required",
+      });
+    }
+
+    const { data: existingUser } = await supabase
+      .from("users")
+      .select("*")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+
+    let finalRole = newRole;
+
+    if (existingUser?.role) {
+      const oldRole = existingUser.role;
+
+      if (oldRole === newRole) {
+        finalRole = oldRole;
+      } else if (
+        (oldRole === "buyer" && newRole === "farmer") ||
+        (oldRole === "farmer" && newRole === "buyer") ||
+        oldRole === "both"
+      ) {
+        finalRole = "both";
+      }
+    }
+
+    if (existingUser) {
+      const { data: updatedUser, error: updateError } = await supabase
+        .from("users")
+        .update({
+          name: existingUser.name || userName,
+          phone: phone || existingUser.phone || null,
+          role: finalRole,
+          gst_number: gst_number || existingUser.gst_number || null,
+          is_verified: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("email", normalizedEmail)
+        .select("*")
+        .single();
+
+      if (updateError) {
+        return res.status(400).json({ message: updateError.message });
+      }
+
+      return res.status(200).json({
+        message: "Profile updated successfully",
+        user: updatedUser,
+      });
+    }
+
+    const { data: newUser, error } = await supabase
+      .from("users")
+      .insert([
+        {
+          name: userName,
+          email: normalizedEmail,
+          phone: phone || null,
+          role: finalRole,
+          gst_number: gst_number || null,
+          is_verified: true,
+        },
+      ])
+      .select("*")
+      .single();
+
+    if (error) {
+      return res.status(400).json({ message: error.message });
+    }
+
+    return res.status(201).json({
+      message: "Profile created successfully",
+      user: newUser,
+    });
+  } catch (error) {
+    console.error("Register profile error:", error);
+    return res.status(500).json({ message: error.message });
+  }
+};

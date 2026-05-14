@@ -232,11 +232,20 @@ export default function Login() {
       localStorage.setItem("user", JSON.stringify(data.user));
       localStorage.setItem("role", data.role);
 
-      if (data.role === "farmer") {
-        navigate("/seller-dashboard");
-      } else {
-        navigate("/buyer-dashboard");
-      }
+      // if (data.role === "farmer") {
+      //   navigate("/seller-dashboard");
+      // } else {
+      //   navigate("/buyer-dashboard");
+      // }
+
+
+      if (data.role === "both") {
+  navigate("/choose-role");
+} else if (data.role === "farmer") {
+  navigate("/seller-dashboard");
+} else {
+  navigate("/buyer-dashboard");
+}
     } catch (err) {
       setError(err.message || "Something went wrong");
     } finally {

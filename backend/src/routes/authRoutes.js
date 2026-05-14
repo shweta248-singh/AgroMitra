@@ -4,6 +4,7 @@ import { registerUser, loginUser } from "../controllers/authController.js";
 import { googleLogin } from "../controllers/authController.js";
 import { verifyOTP } from "../controllers/authController.js";
 import {registerSeller } from "../controllers/authController.js";
+import { registerProfile } from "../controllers/authController.js";
 
 const router = express.Router();
 
@@ -19,6 +20,7 @@ router.post("/register-seller", registerSeller);
 router.post("/verify-otp", verifyOTP);
 router.post("/login", loginUser);
 router.post("/google", googleLogin);
+router.post("/register/profile", registerProfile);
 
 
 
