@@ -5,6 +5,8 @@ import { googleLogin } from "../controllers/authController.js";
 import { verifyOTP } from "../controllers/authController.js";
 import {registerSeller } from "../controllers/authController.js";
 import { registerProfile } from "../controllers/authController.js";
+import { sendRegisterOtp } from "../controllers/authController.js";
+import {verifyRegisterOtp} from "../controllers/authController.js";
 
 const router = express.Router();
 
@@ -21,6 +23,8 @@ router.post("/verify-otp", verifyOTP);
 router.post("/login", loginUser);
 router.post("/google", googleLogin);
 router.post("/register/profile", registerProfile);
+router.post("/register/send-otp", sendRegisterOtp);
+router.post("/register/verify-otp", verifyRegisterOtp);
 
 
 

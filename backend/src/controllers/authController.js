@@ -299,6 +299,8 @@
 import { OAuth2Client } from "google-auth-library";
 import { generateToken } from "../utils/generateToken.js";
 import { supabase } from "../config/supabase.js";
+import bcrypt from "bcryptjs";
+import { sendOtpEmail } from "../services/emailService.js";
 
 const validateUser = (name, email, password) => {
   if (!name || !email || !password) {
@@ -363,21 +365,45 @@ export const registerUser = async (req, res) => {
       });
     }
 
-    await supabase.from("users").upsert(
-      {
-        id: authUser.id,
-        name: userName,
-        email: normalizedEmail,
-        role: assignedRole,
-        phone: phone || null,
-        gst_number: assignedRole === "farmer" ? gst_number || null : null,
-        is_verified: false,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        onConflict: "id",
-      }
-    );
+   await supabase.from("users").upsert(
+  {
+    id: authUser.id,
+    name: userName,
+    email: normalizedEmail,
+    role: assignedRole,
+    phone: phone || null,
+    gst_number: assignedRole === "farmer" ? gst_number || null : null,
+    is_verified: true,
+    updated_at: new Date().toISOString(),
+  },
+  {
+    onConflict: "id",
+  }
+);
+
+// ALSO CREATE/UPDATE PROFILE TABLE
+await supabase.from("profiles").upsert(
+  {
+    id: authUser.id,
+
+    full_name: userName,
+
+    email: normalizedEmail,
+
+    phone: phone || null,
+
+    role: assignedRole,
+
+    is_verified: true,
+
+    is_active: true,
+
+    updated_at: new Date().toISOString(),
+  },
+  {
+    onConflict: "id",
+  }
+);
 
     return res.status(201).json({
       message:
@@ -670,6 +696,162 @@ export const registerProfile = async (req, res) => {
     });
   } catch (error) {
     console.error("Register profile error:", error);
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+
+
+export const sendRegisterOtp = async (req, res) => {
+  try {
+    const { name, full_name, email, password, role, phone, gst_number } = req.body;
+
+    const userName = name || full_name;
+    const normalizedEmail = email?.trim().toLowerCase();
+
+    const errorMsg = validateUser(userName, normalizedEmail, password);
+    if (errorMsg) {
+      return res.status(400).json({ message: errorMsg });
+    }
+
+    const assignedRole =
+      role === "seller" || role === "farmer" ? "farmer" : "buyer";
+
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+    const { error } = await supabase.from("otp_verifications").insert({
+      email: normalizedEmail,
+      otp: otpHash,
+      expires_at: expiresAt,
+      verified: false,
+      metadata: {
+        name: userName,
+        full_name: userName,
+        phone: phone || null,
+        role: assignedRole,
+        gst_number: assignedRole === "farmer" ? gst_number || null : null,
+        password,
+      },
+    });
+
+    if (error) {
+      return res.status(400).json({ message: error.message });
+    }
+
+    await sendOtpEmail(normalizedEmail, otp);
+
+    return res.json({
+      message: "OTP sent successfully",
+    });
+  } catch (error) {
+    console.error("Send register OTP error:", error);
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+export const verifyRegisterOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    const normalizedEmail = email?.trim().toLowerCase();
+
+    if (!normalizedEmail || !otp) {
+      return res.status(400).json({ message: "Email and OTP are required" });
+    }
+
+    const { data: otpRow, error: otpError } = await supabase
+      .from("otp_verifications")
+      .select("*")
+      .eq("email", normalizedEmail)
+      .eq("verified", false)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (otpError || !otpRow) {
+      return res.status(400).json({ message: "OTP not found or expired" });
+    }
+
+    if (new Date(otpRow.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ message: "OTP expired" });
+    }
+
+    const isOtpValid = await bcrypt.compare(String(otp), otpRow.otp);
+
+    if (!isOtpValid) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+
+    const meta = otpRow.metadata || {};
+    const userName = meta.name || meta.full_name || normalizedEmail.split("@")[0];
+    const assignedRole =
+      meta.role === "seller" || meta.role === "farmer" ? "farmer" : "buyer";
+
+    const { data: authData, error: authError } =
+      await supabase.auth.admin.createUser({
+        email: normalizedEmail,
+        password: meta.password,
+        email_confirm: true,
+        user_metadata: {
+          name: userName,
+          full_name: userName,
+          phone: meta.phone || "",
+          role: assignedRole,
+          gst_number: meta.gst_number || null,
+        },
+      });
+
+    if (authError && !authError.message?.includes("already registered")) {
+      return res.status(400).json({ message: authError.message });
+    }
+
+    const authUser = authData?.user;
+
+    if (!authUser) {
+      return res.status(400).json({
+        message: "User already exists or registration failed",
+      });
+    }
+
+    await supabase.from("users").upsert(
+      {
+        id: authUser.id,
+        name: userName,
+        email: normalizedEmail,
+        role: assignedRole,
+        phone: meta.phone || null,
+        gst_number: assignedRole === "farmer" ? meta.gst_number || null : null,
+        is_verified: true,
+      },
+      { onConflict: "id" }
+    );
+
+    await supabase.from("profiles").upsert(
+      {
+        id: authUser.id,
+        full_name: userName,
+        email: normalizedEmail,
+        phone: meta.phone || null,
+        role: assignedRole,
+        is_verified: true,
+        is_active: true,
+      },
+      { onConflict: "id" }
+    );
+
+    await supabase
+      .from("otp_verifications")
+      .update({ verified: true })
+      .eq("id", otpRow.id);
+
+    return res.json({
+      message: "Registration verified successfully",
+      role: assignedRole,
+    });
+  } catch (error) {
+    console.error("Verify register OTP error:", error);
     return res.status(500).json({ message: error.message });
   }
 };

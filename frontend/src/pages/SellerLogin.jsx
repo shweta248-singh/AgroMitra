@@ -51,14 +51,29 @@ export default function SellerLogin() {
       if (userFetchError || !user) throw new Error(t('auth.error_auth_failed'));
 
       // Fetch profile to check role
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .maybeSingle();
+      const { data: profile, error: profileError } = await supabase
+  .from("profiles")
+  .select("role, roles")
+  .eq("id", user.id)
+  .maybeSingle();
 
-      const userRole = profile?.role || 'farmer';
-      const allowedRoles = ['farmer', 'seller', 'both', 'admin'];
+if (profileError || !profile) {
+  throw new Error("Seller profile not found. Please register as seller first.");
+}
+
+const userRole = profile.role;
+const userRoles = profile.roles || [];
+
+const isSeller =
+  userRole === "farmer" ||
+  userRole === "seller" ||
+  userRole === "both" ||
+  userRoles.includes("farmer") ||
+  userRoles.includes("seller");
+
+if (!isSeller) {
+  throw new Error("You are not registered as a Seller/Farmer. Please register first.");
+}
 
       if (!allowedRoles.includes(userRole)) {
         throw new Error("You are not registered as a Seller/Farmer. Please register first.");

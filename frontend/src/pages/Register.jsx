@@ -736,6 +736,15 @@ import "../components/landing.css";
 const GST_REGEX =
   /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
+const getApiUrl = () => {
+  const raw =
+    import.meta.env.VITE_API_URL ||
+    import.meta.env.VITE_API_BASE_URL ||
+    "http://localhost:5000/api";
+
+  return raw.replace(/\/$/, "");
+};
+
 export default function Register() {
   const navigate = useNavigate();
   const { t } = useLanguage();
@@ -757,6 +766,8 @@ export default function Register() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const useBackendOtp = import.meta.env.VITE_USE_BACKEND_OTP === "true";
+
   function safeText(key, fallback) {
     return t(key) || fallback;
   }
@@ -770,16 +781,28 @@ export default function Register() {
     }));
   }
 
-  async function saveUserToBackend() {
-    const apiUrl = (
-      import.meta.env.VITE_API_URL ||
-      import.meta.env.VITE_API_BASE_URL ||
-      ""
-    ).replace(/\/$/, "");
-
-    if (!apiUrl) return;
-
+  function buildPayload() {
     const dbRole = formData.role === "seller" ? "farmer" : "buyer";
+
+    return {
+      full_name: formData.full_name.trim(),
+      name: formData.full_name.trim(),
+      email: normalizeEmail(formData.email),
+      password: formData.password,
+      phone: formData.phone.trim(),
+      role: dbRole,
+      registerAs: formData.role,
+      allow_same_email_multi_role: true,
+      gst_number:
+        formData.role === "seller"
+          ? formData.gst_number.trim().toUpperCase()
+          : null,
+    };
+  }
+
+  async function saveUserToBackend() {
+    const apiUrl = getApiUrl();
+    const payload = buildPayload();
 
     try {
       await fetch(`${apiUrl}/auth/register/profile`, {
@@ -787,17 +810,7 @@ export default function Register() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          full_name: formData.full_name.trim(),
-          name: formData.full_name.trim(),
-          email: normalizeEmail(formData.email),
-          phone: formData.phone.trim(),
-          role: dbRole,
-          gst_number:
-            formData.role === "seller"
-              ? formData.gst_number.trim().toUpperCase()
-              : null,
-        }),
+        body: JSON.stringify(payload),
       });
     } catch (err) {
       console.warn("Profile sync skipped:", err.message);
@@ -836,6 +849,33 @@ export default function Register() {
     setSuccess("");
 
     try {
+      const apiUrl = getApiUrl();
+      const payload = buildPayload();
+
+      if (useBackendOtp) {
+        console.log("USING BACKEND OTP FLOW");
+
+        const response = await fetch(`${apiUrl}/auth/register/send-otp`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(data.message || "Failed to send OTP");
+        }
+
+        setSuccess("OTP sent to your email. Please enter OTP to verify account.");
+        setStep("otp");
+        return;
+      }
+
+      console.log("ATTEMPTING SUPABASE SIGNUP");
+
       const dbRole = formData.role === "seller" ? "farmer" : "buyer";
 
       const { error: signUpError } = await supabase.auth.signUp({
@@ -859,8 +899,13 @@ export default function Register() {
         throw signUpError;
       }
 
-      setSuccess("OTP sent to your email. Please enter OTP to verify account.");
-      setStep("otp");
+      await saveUserToBackend();
+
+      setSuccess("Registration successful. Redirecting to login...");
+
+      setTimeout(() => {
+        navigate(formData.role === "seller" ? "/seller-login" : "/buyer-login");
+      }, 1500);
     } catch (err) {
       setError(err.message || "Registration failed");
     } finally {
@@ -873,9 +918,7 @@ export default function Register() {
 
     if (loading) return;
 
-    const normalizedEmail = normalizeEmail(formData.email);
-
-    if (!otp || otp.length < 6) {
+    if (!otp || otp.length < 4) {
       setError("Please enter valid OTP");
       return;
     }
@@ -885,6 +928,38 @@ export default function Register() {
     setSuccess("");
 
     try {
+      const apiUrl = getApiUrl();
+      const payload = buildPayload();
+
+      if (useBackendOtp) {
+        const response = await fetch(`${apiUrl}/auth/register/verify-otp`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...payload,
+            otp,
+          }),
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(data.message || "OTP verification failed");
+        }
+
+        setSuccess("Account verified successfully. Redirecting to login...");
+
+        setTimeout(() => {
+          navigate(formData.role === "seller" ? "/seller-login" : "/buyer-login");
+        }, 1500);
+
+        return;
+      }
+
+      const normalizedEmail = normalizeEmail(formData.email);
+
       const { error: verifyError } = await supabase.auth.verifyOtp({
         email: normalizedEmail,
         token: otp,
@@ -924,6 +999,28 @@ export default function Register() {
     setSuccess("");
 
     try {
+      const apiUrl = getApiUrl();
+      const payload = buildPayload();
+
+      if (useBackendOtp) {
+        const response = await fetch(`${apiUrl}/auth/register/send-otp`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(data.message || "Failed to resend OTP");
+        }
+
+        setSuccess("New OTP sent to your email.");
+        return;
+      }
+
       const { error: resendError } = await supabase.auth.resend({
         type: "signup",
         email: normalizedEmail,
@@ -940,42 +1037,6 @@ export default function Register() {
       setLoading(false);
     }
   }
-
-  async function saveUserToBackend() {
-  const apiUrl = (
-    import.meta.env.VITE_API_URL ||
-    import.meta.env.VITE_API_BASE_URL ||
-    ""
-  ).replace(/\/$/, "");
-
-  if (!apiUrl) return;
-
-  const newRole = formData.role === "seller" ? "farmer" : "buyer";
-  const email = normalizeEmail(formData.email);
-
-  try {
-    await fetch(`${apiUrl}/auth/register/profile`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        full_name: formData.full_name.trim(),
-        name: formData.full_name.trim(),
-        email,
-        phone: formData.phone.trim(),
-        role: newRole,
-        allow_same_email_multi_role: true,
-        gst_number:
-          formData.role === "seller"
-            ? formData.gst_number.trim().toUpperCase()
-            : null,
-      }),
-    });
-  } catch (err) {
-    console.warn("Profile sync skipped:", err.message);
-  }
-}
 
   return (
     <section className="register-page">
